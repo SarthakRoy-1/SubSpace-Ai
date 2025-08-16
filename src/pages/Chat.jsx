@@ -1,4 +1,4 @@
-// src/pages/Chat.jsx - Updated without debug messages
+// src/pages/Chat.jsx - Enhanced for OpenRouter
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
@@ -110,27 +110,33 @@ export default function Chat() {
     }
   }, [chatId])
 
-  // Simple, direct AI call
+  // Enhanced AI call with better error handling and system message
   const callAI = async (history) => {
     const res = await fetch('/.netlify/functions/ai-chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        system: 'You are a helpful AI assistant. Provide direct, accurate answers.',
-        messages: history.map(m => ({ role: m.role, content: m.content })).slice(-8)
+        system: 'You are SubSpace AI, a knowledgeable and helpful assistant. Provide accurate, detailed, and informative responses to all questions. Be conversational but professional. If you don\'t know something, admit it and suggest how the user might find the information.',
+        messages: history.slice(-8) // Keep last 8 messages for context
       })
     });
 
     if (!res.ok) {
       const errorText = await res.text();
-      throw new Error(`Request failed: ${errorText}`);
+      console.error('AI API Error:', res.status, errorText);
+      throw new Error(`AI service error (${res.status}). Please try again.`);
     }
 
     const data = await res.json();
-    return data?.reply || 'Sorry, I could not generate a response.';
+    
+    if (!data?.reply) {
+      throw new Error('Invalid response from AI service.');
+    }
+    
+    return data.reply;
   };
 
-  // Send message
+  // Send message with better error handling
   const send = async () => {
     if (!chatId || !input.trim()) return
     const text = input.trim()
@@ -138,7 +144,13 @@ export default function Chat() {
     setLoading(true)
 
     const tmpUserId = 'tmp_user_' + Date.now()
-    const userMsg = { id: tmpUserId, chat_id: chatId, role: 'user', content: text, created_at: new Date().toISOString() }
+    const userMsg = { 
+      id: tmpUserId, 
+      chat_id: chatId, 
+      role: 'user', 
+      content: text, 
+      created_at: new Date().toISOString() 
+    }
     setMessages(prev => [...prev, userMsg])
 
     try {
@@ -148,7 +160,11 @@ export default function Chat() {
         .insert({ chat_id: chatId, role: 'user', content: text })
         .select('id, role, content, created_at')
         .single()
-      if (e1) throw e1
+      
+      if (e1) {
+        console.error('Database error saving user message:', e1)
+        throw new Error('Failed to save message. Please try again.')
+      }
 
       setMessages(prev => prev.map(m => (m.id === tmpUserId ? insertedUser : m)))
 
@@ -164,7 +180,13 @@ export default function Chat() {
 
       // Add AI message
       const tmpBotId = 'tmp_bot_' + Date.now()
-      const botMsg = { id: tmpBotId, chat_id: chatId, role: 'assistant', content: reply, created_at: new Date().toISOString() }
+      const botMsg = { 
+        id: tmpBotId, 
+        chat_id: chatId, 
+        role: 'assistant', 
+        content: reply, 
+        created_at: new Date().toISOString() 
+      }
       setMessages(prev => [...prev, botMsg])
 
       // Save AI message
@@ -173,13 +195,30 @@ export default function Chat() {
         .insert({ chat_id: chatId, role: 'assistant', content: reply })
         .select('id, role, content, created_at')
         .single()
-      if (e2) throw e2
+      
+      if (e2) {
+        console.error('Database error saving AI message:', e2)
+        // Keep the message in UI even if DB save fails
+        return
+      }
 
       setMessages(prev => prev.map(m => (m.id === tmpBotId ? insertedBot : m)))
+      
     } catch (err) {
       console.error('send error:', err)
+      // Remove temp messages and show error
       setMessages(prev => prev.filter(m => !String(m.id).startsWith('tmp_')))
-      alert(`Error: ${err.message}`)
+      
+      // Add error message from AI
+      const errorMsg = { 
+        id: 'error_' + Date.now(), 
+        chat_id: chatId, 
+        role: 'assistant', 
+        content: `Sorry, I encountered an error: ${err.message}. Please try asking your question again.`, 
+        created_at: new Date().toISOString() 
+      }
+      setMessages(prev => [...prev, errorMsg])
+      
     } finally {
       setLoading(false)
       setTimeout(() => scrollRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
@@ -188,6 +227,9 @@ export default function Chat() {
 
   const clear = async () => {
     if (!chatId) return
+    const confirmed = window.confirm('Are you sure you want to clear all messages?')
+    if (!confirmed) return
+    
     await supabase.from('messages').delete().eq('chat_id', chatId)
     seenIds.current = new Set()
     setMessages([])
@@ -195,13 +237,21 @@ export default function Chat() {
 
   return (
     <div className="min-h-screen flex flex-col">
-      {/* Header - No debug message */}
-      <div className="sticky top-0 z-10 bg-ink/70 backdrop-blur border-b border-white/10">
+      {/* Header */}
+      <div className="sticky top-0 z-10 bg-ink/90 backdrop-blur border-b border-white/10">
         <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
-          <div className="font-medium">SubSpace</div>
+          <div className="flex items-center gap-2">
+            <div className="font-medium text-lg">SubSpace</div>
+            <div className="text-xs text-white/50 bg-white/10 px-2 py-1 rounded">AI Chat</div>
+          </div>
           <div className="flex items-center gap-3">
-            <button onClick={clear} className="px-3 py-1.5 rounded bg-white/10 hover:bg-white/20">Clear</button>
-            <SignOutButton className="px-3 py-1.5 rounded bg-white/10 hover:bg-white/20" />
+            <button 
+              onClick={clear} 
+              className="px-3 py-1.5 rounded bg-white/10 hover:bg-white/20 transition-colors text-sm"
+            >
+              Clear Chat
+            </button>
+            <SignOutButton className="px-3 py-1.5 rounded bg-red-500/20 hover:bg-red-500/30 transition-colors text-sm" />
           </div>
         </div>
       </div>
@@ -210,26 +260,70 @@ export default function Chat() {
       <div className="flex-1 max-w-4xl mx-auto w-full px-4 py-6">
         {messages.length === 0 ? (
           <div className="h-[60vh] grid place-items-center">
-            <div className="text-center">
-              <div className="text-xl sm:text-2xl mb-2">
-                {profileName ? `${profileName}, how can I help you?` : 'How can I help you?'}
+            <div className="text-center space-y-4">
+              <div className="text-xl sm:text-2xl font-medium">
+                {profileName ? `Hello ${profileName}! 👋` : 'Welcome to SubSpace! 👋'}
               </div>
-              <div className="text-white/60 text-sm">Ask me anything - I'll give you detailed answers</div>
+              <div className="text-white/60 text-sm max-w-md">
+                I'm your AI assistant powered by advanced language models. Ask me anything - from complex questions to simple conversations, I'm here to help with detailed and accurate responses.
+              </div>
+              <div className="flex flex-wrap gap-2 justify-center">
+                <button 
+                  onClick={() => setInput("What can you help me with?")}
+                  className="px-3 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-sm transition-colors"
+                >
+                  What can you help with?
+                </button>
+                <button 
+                  onClick={() => setInput("Explain quantum computing")}
+                  className="px-3 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-sm transition-colors"
+                >
+                  Explain quantum computing
+                </button>
+                <button 
+                  onClick={() => setInput("Help me write code")}
+                  className="px-3 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-sm transition-colors"
+                >
+                  Help me write code
+                </button>
+              </div>
             </div>
           </div>
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-4">
             {messages.map(m => (
-              <div key={m.id} className={m.role === 'user' ? 'text-right' : 'text-left'}>
-                <div className={`inline-block px-3 py-2 rounded-lg max-w-[80%] ${
-                  m.role==='user' 
-                    ? 'bg-blue-600' 
-                    : 'bg-white/10'
+              <div key={m.id} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div className={`max-w-[85%] sm:max-w-[70%] ${
+                  m.role === 'user' 
+                    ? 'bg-blue-600 text-white' 
+                    : 'bg-white/10 text-white'
+                } px-4 py-3 rounded-2xl ${
+                  m.role === 'user' ? 'rounded-br-md' : 'rounded-bl-md'
                 }`}>
-                  {m.content}
+                  <div className="whitespace-pre-wrap break-words">{m.content}</div>
+                  {m.role === 'assistant' && (
+                    <div className="text-xs text-white/40 mt-2 flex items-center gap-1">
+                      <div className="w-1.5 h-1.5 bg-green-400 rounded-full"></div>
+                      SubSpace AI
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
+            {loading && (
+              <div className="flex justify-start">
+                <div className="bg-white/10 px-4 py-3 rounded-2xl rounded-bl-md">
+                  <div className="flex items-center gap-2 text-white/60">
+                    <div className="flex space-x-1">
+                      <div className="w-2 h-2 bg-white/40 rounded-full animate-bounce"></div>
+                      <div className="w-2 h-2 bg-white/40 rounded-full animate-bounce" style={{animationDelay: '0.1s'}}></div>
+                      <div className="w-2 h-2 bg-white/40 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
+                    </div>
+                    <span className="text-sm">SubSpace AI is thinking...</span>
+                  </div>
+                </div>
+              </div>
+            )}
             <div ref={scrollRef} />
           </div>
         )}
@@ -237,21 +331,41 @@ export default function Chat() {
 
       {/* Input */}
       <div className="max-w-4xl mx-auto w-full px-4 pb-6">
-        <div className="flex gap-2">
-          <input
-            value={input}
-            onChange={(e)=>setInput(e.target.value)}
-            onKeyDown={(e)=> e.key==='Enter' && !e.shiftKey ? (e.preventDefault(), send()) : null}
-            placeholder="Ask me anything..."
-            className="flex-1 rounded-md bg-white/10 px-3 py-3 outline-none focus:ring-2 ring-blue-400"
-          />
+        <div className="flex gap-3 items-end">
+          <div className="flex-1">
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault()
+                  send()
+                }
+              }}
+              placeholder="Ask me anything... (Press Shift+Enter for new line)"
+              className="w-full rounded-xl bg-white/10 px-4 py-3 outline-none focus:ring-2 ring-blue-400 resize-none min-h-[48px] max-h-32"
+              rows={1}
+              style={{
+                height: 'auto',
+                minHeight: '48px',
+                maxHeight: '128px'
+              }}
+              onInput={(e) => {
+                e.target.style.height = 'auto'
+                e.target.style.height = Math.min(e.target.scrollHeight, 128) + 'px'
+              }}
+            />
+          </div>
           <button
             onClick={send}
-            disabled={loading || !chatId}
-            className="px-4 rounded-md bg-blue-500 hover:bg-blue-600 disabled:opacity-60"
+            disabled={loading || !chatId || !input.trim()}
+            className="px-4 py-3 rounded-xl bg-blue-500 hover:bg-blue-600 disabled:opacity-60 disabled:cursor-not-allowed transition-colors font-medium"
           >
-            {loading ? '…' : 'Send'}
+            {loading ? '⏳' : '🚀'}
           </button>
+        </div>
+        <div className="text-xs text-white/40 mt-2 text-center">
+          SubSpace AI can make mistakes. Please verify important information.
         </div>
       </div>
     </div>
