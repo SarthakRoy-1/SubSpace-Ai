@@ -1,4 +1,4 @@
-// src/pages/Chat.jsx
+// src/pages/Chat.jsx - Updated callAI function with better error handling
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
@@ -11,11 +11,12 @@ export default function Chat() {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
+  const [debugInfo, setDebugInfo] = useState('') // For debugging
   const seenIds = useRef(new Set())
   const scrollRef = useRef(null)
   const navigate = useNavigate()
 
-  // ----- auth session + name
+  // ----- auth session + name (unchanged)
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session)
@@ -36,7 +37,7 @@ export default function Chat() {
     return () => sub?.subscription?.unsubscribe()
   }, [navigate])
 
-  // ----- ensure user has a default chat
+  // ----- ensure user has a default chat (unchanged)
   useEffect(() => {
     if (!session?.user?.id) return
     ;(async () => {
@@ -68,7 +69,7 @@ export default function Chat() {
     })()
   }, [session?.user?.id])
 
-  // ----- load all messages for this chat
+  // ----- load messages (unchanged)
   const load = async (id = chatId) => {
     if (!id) return
     const { data, error } = await supabase
@@ -90,7 +91,6 @@ export default function Chat() {
     if (!chatId) return
     load(chatId)
 
-    // ----- realtime updates (optional; requires Supabase Realtime on messages table)
     const channel = supabase
       .channel(`messages:${chatId}`)
       .on(
@@ -111,40 +111,83 @@ export default function Chat() {
     }
   }, [chatId])
 
-  // ----- call the Netlify function; parse text first to avoid "Unexpected end of JSON input"
+  // ----- IMPROVED callAI function with multiple fallback URLs
   const callAI = async (history) => {
-    const res = await fetch('/.netlify/functions/ai-chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        system: 'You are a concise, helpful AI assistant for the SubSpace app. Keep answers clear and friendly.',
-        messages: history.map(m => ({ role: m.role, content: m.content })).slice(-12)
-      })
-    })
+    const requestBody = {
+      system: 'You are a concise, helpful AI assistant for the SubSpace app. Keep answers clear and friendly.',
+      messages: history.map(m => ({ role: m.role, content: m.content })).slice(-12)
+    };
 
-    const text = await res.text()
-    let data = null
-    try { data = text ? JSON.parse(text) : null } catch (_) {/* non-JSON from server */}
-    if (!res.ok) {
-      throw new Error(data?.error || text || `HTTP ${res.status} ${res.statusText}`)
+    // Try multiple function URLs in order
+    const functionUrls = [
+      '/.netlify/functions/ai-chat',  // Standard Netlify functions path
+      '/api/ai-chat',                 // Alternative API path
+      '/functions/ai-chat'            // Alternative functions path
+    ];
+
+    let lastError = null;
+    
+    for (const url of functionUrls) {
+      try {
+        console.log(`Trying AI function at: ${url}`);
+        
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestBody)
+        });
+
+        console.log(`Response from ${url}:`, res.status, res.statusText);
+
+        if (res.status === 404) {
+          setDebugInfo(`Function not found at ${url}`);
+          continue; // Try next URL
+        }
+
+        const text = await res.text();
+        console.log(`Response text from ${url}:`, text.substring(0, 200));
+
+        let data = null;
+        try { 
+          data = text ? JSON.parse(text) : null; 
+        } catch (parseError) {
+          throw new Error(`Invalid JSON from ${url}: ${text.substring(0, 100)}`);
+        }
+
+        if (!res.ok) {
+          throw new Error(data?.error || `HTTP ${res.status} from ${url}: ${text.substring(0, 100)}`);
+        }
+
+        setDebugInfo(`✅ Function working at ${url}`);
+        return data?.reply || 'Sorry, I could not generate a response.';
+
+      } catch (error) {
+        console.error(`Error with ${url}:`, error);
+        lastError = error;
+        setDebugInfo(`❌ Error with ${url}: ${error.message}`);
+        continue; // Try next URL
+      }
     }
-    return data?.reply || 'Sorry, I could not generate a response.'
-  }
 
-  // ----- send message with optimistic UI + persistence
+    // If all URLs failed, provide helpful error message
+    throw new Error(
+      `All function URLs failed. Last error: ${lastError?.message || 'Unknown error'}. ` +
+      `Make sure your site is deployed to Netlify with functions enabled.`
+    );
+  };
+
+  // ----- send message (unchanged except for better error handling)
   const send = async () => {
     if (!chatId || !input.trim()) return
     const text = input.trim()
     setInput('')
     setLoading(true)
 
-    // optimistic user bubble
     const tmpUserId = 'tmp_user_' + Date.now()
     const userMsg = { id: tmpUserId, chat_id: chatId, role: 'user', content: text, created_at: new Date().toISOString() }
     setMessages(prev => [...prev, userMsg])
 
     try {
-      // persist user message
       const { data: insertedUser, error: e1 } = await supabase
         .from('messages')
         .insert({ chat_id: chatId, role: 'user', content: text })
@@ -152,24 +195,21 @@ export default function Chat() {
         .single()
       if (e1) throw e1
 
-      // reconcile optimistic temp id
       setMessages(prev => prev.map(m => (m.id === tmpUserId ? insertedUser : m)))
 
-      // call AI using current history (+ this new user message)
       const history = [
         ...messages
           .filter(m => !String(m.id).startsWith('tmp_'))
           .map(m => ({ role: m.role, content: m.content })),
         { role: 'user', content: text }
       ]
+      
       const reply = await callAI(history)
 
-      // optimistic assistant bubble
       const tmpBotId = 'tmp_bot_' + Date.now()
       const botMsg = { id: tmpBotId, chat_id: chatId, role: 'assistant', content: reply, created_at: new Date().toISOString() }
       setMessages(prev => [...prev, botMsg])
 
-      // persist assistant message
       const { data: insertedBot, error: e2 } = await supabase
         .from('messages')
         .insert({ chat_id: chatId, role: 'assistant', content: reply })
@@ -177,13 +217,11 @@ export default function Chat() {
         .single()
       if (e2) throw e2
 
-      // reconcile optimistic temp id
       setMessages(prev => prev.map(m => (m.id === tmpBotId ? insertedBot : m)))
     } catch (err) {
       console.error('send error:', err)
-      // rollback any temp bubbles if error
       setMessages(prev => prev.filter(m => !String(m.id).startsWith('tmp_')))
-      alert(err.message || 'Failed to send')
+      alert(`Error: ${err.message}`)
     } finally {
       setLoading(false)
       setTimeout(() => scrollRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
@@ -195,6 +233,7 @@ export default function Chat() {
     await supabase.from('messages').delete().eq('chat_id', chatId)
     seenIds.current = new Set()
     setMessages([])
+    setDebugInfo('')
   }
 
   return (
@@ -207,6 +246,11 @@ export default function Chat() {
             <SignOutButton className="px-3 py-1.5 rounded bg-white/10 hover:bg-white/20" />
           </div>
         </div>
+        {debugInfo && (
+          <div className="max-w-4xl mx-auto px-4 py-2 text-xs text-white/70 border-t border-white/10">
+            🔧 Debug: {debugInfo}
+          </div>
+        )}
       </div>
 
       <div className="flex-1 max-w-4xl mx-auto w-full px-4 py-6">
