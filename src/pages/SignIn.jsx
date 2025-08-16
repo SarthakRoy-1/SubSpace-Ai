@@ -5,8 +5,8 @@ import AuthCard from '../components/AuthCard.jsx'
 import AuthPage from './AuthPage.jsx'
 
 export default function SignIn() {
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
+  const [email, setEmail] = useState('') // Explicitly empty
+  const [password, setPassword] = useState('') // Explicitly empty
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const navigate = useNavigate()
@@ -36,21 +36,36 @@ export default function SignIn() {
           {error && <div className="text-red-400 text-sm">{error}</div>}
           <div className="space-y-2">
             <label className="block text-sm">Email</label>
-            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+            <input 
+              type="email" 
+              value={email} 
+              onChange={(e) => setEmail(e.target.value)}
               className="w-full rounded-md bg-white/10 px-3 py-2 outline-none focus:ring-2 ring-blue-400"
-              placeholder="you@example.com" required />
+              placeholder="you@example.com" 
+              autoComplete="off"
+              required 
+            />
           </div>
           <div className="space-y-2">
             <label className="block text-sm">Password</label>
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+            <input 
+              type="password" 
+              value={password} 
+              onChange={(e) => setPassword(e.target.value)}
               className="w-full rounded-md bg-white/10 px-3 py-2 outline-none focus:ring-2 ring-blue-400"
-              placeholder="••••••••" required />
+              placeholder="Enter your password"
+              autoComplete="new-password"
+              required 
+            />
             <div className="text-right">
               <Link className="text-xs text-white/70 underline" to="/reset">Forgot password?</Link>
             </div>
           </div>
-          <button disabled={loading} type="submit"
-            className="w-full rounded-md bg-blue-500 hover:bg-blue-600 disabled:opacity-60 py-2.5 font-medium">
+          <button 
+            disabled={loading} 
+            type="submit"
+            className="w-full rounded-md bg-blue-500 hover:bg-blue-600 disabled:opacity-60 py-2.5 font-medium"
+          >
             {loading ? 'Signing in…' : 'Sign in'}
           </button>
         </form>

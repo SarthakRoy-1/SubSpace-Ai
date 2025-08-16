@@ -5,9 +5,9 @@ import AuthCard from '../components/AuthCard.jsx'
 import AuthPage from './AuthPage.jsx'
 
 export default function SignUp() {
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [name, setName] = useState('') // Fixed: removed default value
+  const [email, setEmail] = useState('') // Explicitly empty
+  const [password, setPassword] = useState('') // Explicitly empty
+  const [name, setName] = useState('') // Explicitly empty
   const [loading, setLoading] = useState(false)
   const [info, setInfo] = useState('')
   const [error, setError] = useState('')
@@ -48,6 +48,7 @@ export default function SignUp() {
               onChange={(e) => setName(e.target.value)}
               className="w-full rounded-md bg-white/10 px-3 py-2 outline-none focus:ring-2 ring-blue-400"
               placeholder="Enter your full name"
+              autoComplete="off"
               required 
             />
           </div>
@@ -58,7 +59,8 @@ export default function SignUp() {
               value={email} 
               onChange={(e) => setEmail(e.target.value)}
               className="w-full rounded-md bg-white/10 px-3 py-2 outline-none focus:ring-2 ring-blue-400"
-              placeholder="you@example.com" 
+              placeholder="you@example.com"
+              autoComplete="off"
               required 
             />
           </div>
@@ -69,7 +71,8 @@ export default function SignUp() {
               value={password} 
               onChange={(e) => setPassword(e.target.value)}
               className="w-full rounded-md bg-white/10 px-3 py-2 outline-none focus:ring-2 ring-blue-400"
-              placeholder="Minimum 6 characters" 
+              placeholder="Create a secure password"
+              autoComplete="new-password"
               required 
               minLength={6} 
             />
