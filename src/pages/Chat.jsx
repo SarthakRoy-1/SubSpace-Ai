@@ -1,7 +1,8 @@
+// src/pages/Chat.jsx
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { supabase } from '../lib/supabaseClient.js'
-import SignOutButton from '../components/SignOutButton.jsx'
+import { supabase } from '../lib/supabaseClient'
+import SignOutButton from '../components/SignOutButton'
 
 export default function Chat() {
   const [session, setSession] = useState(null)
@@ -14,43 +15,73 @@ export default function Chat() {
   const scrollRef = useRef(null)
   const navigate = useNavigate()
 
-  // session
+  // ----- auth session + name
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session)
-      if (!data.session) navigate('/signin')
-      else {
-        const n = data.session.user?.user_metadata?.full_name || data.session.user?.email?.split('@')[0] || 'friend'
+      if (!data.session) {
+        navigate('/signin')
+      } else {
+        const n =
+          data.session.user?.user_metadata?.full_name ||
+          data.session.user?.email?.split('@')[0] ||
+          'friend'
         setProfileName(n)
       }
     })
     const { data: sub } = supabase.auth.onAuthStateChange((_evt, s) => {
-      setSession(s); if (!s) navigate('/signin')
+      setSession(s)
+      if (!s) navigate('/signin')
     })
     return () => sub?.subscription?.unsubscribe()
   }, [navigate])
 
-  // ensure chat
+  // ----- ensure user has a default chat
   useEffect(() => {
     if (!session?.user?.id) return
     ;(async () => {
-      const { data: chats, error } = await supabase.from('chats').select('id').order('created_at', { ascending: true }).limit(1)
-      if (error) { console.error(error.message); return }
+      const { data: chats, error } = await supabase
+        .from('chats')
+        .select('id')
+        .order('created_at', { ascending: true })
+        .limit(1)
+
+      if (error) {
+        console.error('load chats error:', error.message)
+        return
+      }
+
       let id = chats?.[0]?.id
       if (!id) {
-        const { data: created, error: e2 } = await supabase.from('chats').insert({ user_id: session.user.id, title: 'My chat' }).select('id').single()
-        if (e2) { console.error(e2.message); return }
+        const { data: created, error: ie } = await supabase
+          .from('chats')
+          .insert({ user_id: session.user.id, title: 'My chat' })
+          .select('id')
+          .single()
+        if (ie) {
+          console.error('create chat error:', ie.message)
+          return
+        }
         id = created.id
       }
       setChatId(id)
     })()
   }, [session?.user?.id])
 
+  // ----- load all messages for this chat
   const load = async (id = chatId) => {
     if (!id) return
-    const { data, error } = await supabase.from('messages').select('id, role, content, created_at').eq('chat_id', id).order('created_at', { ascending: true })
-    if (error) { console.error(error.message); return }
-    seenIds.current = new Set(data?.map(m => m.id))
+    const { data, error } = await supabase
+      .from('messages')
+      .select('id, role, content, created_at')
+      .eq('chat_id', id)
+      .order('created_at', { ascending: true })
+
+    if (error) {
+      console.error('load messages error:', error.message)
+      return
+    }
+    seenIds.current = new Set((data || []).map(m => m.id))
     setMessages(data || [])
     setTimeout(() => scrollRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
   }
@@ -59,10 +90,12 @@ export default function Chat() {
     if (!chatId) return
     load(chatId)
 
-    // realtime (optional)
+    // ----- realtime updates (optional; requires Supabase Realtime on messages table)
     const channel = supabase
       .channel(`messages:${chatId}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages', filter: `chat_id=eq.${chatId}` },
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'messages', filter: `chat_id=eq.${chatId}` },
         (payload) => {
           const m = payload.new
           if (!m || seenIds.current.has(m.id)) return
@@ -73,9 +106,12 @@ export default function Chat() {
       )
       .subscribe()
 
-    return () => { supabase.removeChannel(channel) }
+    return () => {
+      supabase.removeChannel(channel)
+    }
   }, [chatId])
 
+  // ----- call the Netlify function; parse text first to avoid "Unexpected end of JSON input"
   const callAI = async (history) => {
     const res = await fetch('/.netlify/functions/ai-chat', {
       method: 'POST',
@@ -85,11 +121,17 @@ export default function Chat() {
         messages: history.map(m => ({ role: m.role, content: m.content })).slice(-12)
       })
     })
-    const data = await res.json()
-    if (!res.ok) throw new Error(data?.error || 'AI error')
-    return data.reply || 'Sorry, I could not generate a response.'
+
+    const text = await res.text()
+    let data = null
+    try { data = text ? JSON.parse(text) : null } catch (_) {/* non-JSON from server */}
+    if (!res.ok) {
+      throw new Error(data?.error || text || `HTTP ${res.status} ${res.statusText}`)
+    }
+    return data?.reply || 'Sorry, I could not generate a response.'
   }
 
+  // ----- send message with optimistic UI + persistence
   const send = async () => {
     if (!chatId || !input.trim()) return
     const text = input.trim()
@@ -97,21 +139,29 @@ export default function Chat() {
     setLoading(true)
 
     // optimistic user bubble
-    const tmpId = 'tmp_' + Date.now()
-    const userMsg = { id: tmpId, chat_id: chatId, role: 'user', content: text, created_at: new Date().toISOString() }
+    const tmpUserId = 'tmp_user_' + Date.now()
+    const userMsg = { id: tmpUserId, chat_id: chatId, role: 'user', content: text, created_at: new Date().toISOString() }
     setMessages(prev => [...prev, userMsg])
 
     try {
       // persist user message
       const { data: insertedUser, error: e1 } = await supabase
-        .from('messages').insert({ chat_id: chatId, role: 'user', content: text })
-        .select('id, role, content, created_at').single()
+        .from('messages')
+        .insert({ chat_id: chatId, role: 'user', content: text })
+        .select('id, role, content, created_at')
+        .single()
       if (e1) throw e1
-      // reconcile optimistic
-      setMessages(prev => prev.map(m => m.id === tmpId ? insertedUser : m))
 
-      // call AI using history incl. the just-saved user message
-      const history = [...messages.filter(m => !String(m.id).startsWith('tmp_')).map(m => ({ role: m.role, content: m.content })), { role: 'user', content: text }]
+      // reconcile optimistic temp id
+      setMessages(prev => prev.map(m => (m.id === tmpUserId ? insertedUser : m)))
+
+      // call AI using current history (+ this new user message)
+      const history = [
+        ...messages
+          .filter(m => !String(m.id).startsWith('tmp_'))
+          .map(m => ({ role: m.role, content: m.content })),
+        { role: 'user', content: text }
+      ]
       const reply = await callAI(history)
 
       // optimistic assistant bubble
@@ -121,12 +171,17 @@ export default function Chat() {
 
       // persist assistant message
       const { data: insertedBot, error: e2 } = await supabase
-        .from('messages').insert({ chat_id: chatId, role: 'assistant', content: reply })
-        .select('id, role, content, created_at').single()
+        .from('messages')
+        .insert({ chat_id: chatId, role: 'assistant', content: reply })
+        .select('id, role, content, created_at')
+        .single()
       if (e2) throw e2
-      setMessages(prev => prev.map(m => m.id === tmpBotId ? insertedBot : m))
+
+      // reconcile optimistic temp id
+      setMessages(prev => prev.map(m => (m.id === tmpBotId ? insertedBot : m)))
     } catch (err) {
-      console.error(err)
+      console.error('send error:', err)
+      // rollback any temp bubbles if error
       setMessages(prev => prev.filter(m => !String(m.id).startsWith('tmp_')))
       alert(err.message || 'Failed to send')
     } finally {
@@ -138,6 +193,7 @@ export default function Chat() {
   const clear = async () => {
     if (!chatId) return
     await supabase.from('messages').delete().eq('chat_id', chatId)
+    seenIds.current = new Set()
     setMessages([])
   }
 
