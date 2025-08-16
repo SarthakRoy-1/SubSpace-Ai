@@ -1,4 +1,4 @@
-// src/pages/Chat.jsx - Updated callAI function with better error handling
+// src/pages/Chat.jsx - Updated without debug messages
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
@@ -11,12 +11,11 @@ export default function Chat() {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
-  const [debugInfo, setDebugInfo] = useState('') // For debugging
   const seenIds = useRef(new Set())
   const scrollRef = useRef(null)
   const navigate = useNavigate()
 
-  // ----- auth session + name (unchanged)
+  // Auth session + name
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session)
@@ -37,7 +36,7 @@ export default function Chat() {
     return () => sub?.subscription?.unsubscribe()
   }, [navigate])
 
-  // ----- ensure user has a default chat (unchanged)
+  // Ensure user has a default chat
   useEffect(() => {
     if (!session?.user?.id) return
     ;(async () => {
@@ -69,7 +68,7 @@ export default function Chat() {
     })()
   }, [session?.user?.id])
 
-  // ----- load messages (unchanged)
+  // Load messages
   const load = async (id = chatId) => {
     if (!id) return
     const { data, error } = await supabase
@@ -111,72 +110,27 @@ export default function Chat() {
     }
   }, [chatId])
 
-  // ----- IMPROVED callAI function with multiple fallback URLs
+  // Simple, direct AI call
   const callAI = async (history) => {
-    const requestBody = {
-      system: 'You are a concise, helpful AI assistant for the SubSpace app. Keep answers clear and friendly.',
-      messages: history.map(m => ({ role: m.role, content: m.content })).slice(-12)
-    };
+    const res = await fetch('/.netlify/functions/ai-chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        system: 'You are a helpful AI assistant. Provide direct, accurate answers.',
+        messages: history.map(m => ({ role: m.role, content: m.content })).slice(-8)
+      })
+    });
 
-    // Try multiple function URLs in order
-    const functionUrls = [
-      '/.netlify/functions/ai-chat',  // Standard Netlify functions path
-      '/api/ai-chat',                 // Alternative API path
-      '/functions/ai-chat'            // Alternative functions path
-    ];
-
-    let lastError = null;
-    
-    for (const url of functionUrls) {
-      try {
-        console.log(`Trying AI function at: ${url}`);
-        
-        const res = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(requestBody)
-        });
-
-        console.log(`Response from ${url}:`, res.status, res.statusText);
-
-        if (res.status === 404) {
-          setDebugInfo(`Function not found at ${url}`);
-          continue; // Try next URL
-        }
-
-        const text = await res.text();
-        console.log(`Response text from ${url}:`, text.substring(0, 200));
-
-        let data = null;
-        try { 
-          data = text ? JSON.parse(text) : null; 
-        } catch (parseError) {
-          throw new Error(`Invalid JSON from ${url}: ${text.substring(0, 100)}`);
-        }
-
-        if (!res.ok) {
-          throw new Error(data?.error || `HTTP ${res.status} from ${url}: ${text.substring(0, 100)}`);
-        }
-
-        setDebugInfo(`✅ Function working at ${url}`);
-        return data?.reply || 'Sorry, I could not generate a response.';
-
-      } catch (error) {
-        console.error(`Error with ${url}:`, error);
-        lastError = error;
-        setDebugInfo(`❌ Error with ${url}: ${error.message}`);
-        continue; // Try next URL
-      }
+    if (!res.ok) {
+      const errorText = await res.text();
+      throw new Error(`Request failed: ${errorText}`);
     }
 
-    // If all URLs failed, provide helpful error message
-    throw new Error(
-      `All function URLs failed. Last error: ${lastError?.message || 'Unknown error'}. ` +
-      `Make sure your site is deployed to Netlify with functions enabled.`
-    );
+    const data = await res.json();
+    return data?.reply || 'Sorry, I could not generate a response.';
   };
 
-  // ----- send message (unchanged except for better error handling)
+  // Send message
   const send = async () => {
     if (!chatId || !input.trim()) return
     const text = input.trim()
@@ -188,6 +142,7 @@ export default function Chat() {
     setMessages(prev => [...prev, userMsg])
 
     try {
+      // Save user message
       const { data: insertedUser, error: e1 } = await supabase
         .from('messages')
         .insert({ chat_id: chatId, role: 'user', content: text })
@@ -197,6 +152,7 @@ export default function Chat() {
 
       setMessages(prev => prev.map(m => (m.id === tmpUserId ? insertedUser : m)))
 
+      // Get AI response
       const history = [
         ...messages
           .filter(m => !String(m.id).startsWith('tmp_'))
@@ -206,10 +162,12 @@ export default function Chat() {
       
       const reply = await callAI(history)
 
+      // Add AI message
       const tmpBotId = 'tmp_bot_' + Date.now()
       const botMsg = { id: tmpBotId, chat_id: chatId, role: 'assistant', content: reply, created_at: new Date().toISOString() }
       setMessages(prev => [...prev, botMsg])
 
+      // Save AI message
       const { data: insertedBot, error: e2 } = await supabase
         .from('messages')
         .insert({ chat_id: chatId, role: 'assistant', content: reply })
@@ -233,11 +191,11 @@ export default function Chat() {
     await supabase.from('messages').delete().eq('chat_id', chatId)
     seenIds.current = new Set()
     setMessages([])
-    setDebugInfo('')
   }
 
   return (
     <div className="min-h-screen flex flex-col">
+      {/* Header - No debug message */}
       <div className="sticky top-0 z-10 bg-ink/70 backdrop-blur border-b border-white/10">
         <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="font-medium">SubSpace</div>
@@ -246,13 +204,9 @@ export default function Chat() {
             <SignOutButton className="px-3 py-1.5 rounded bg-white/10 hover:bg-white/20" />
           </div>
         </div>
-        {debugInfo && (
-          <div className="max-w-4xl mx-auto px-4 py-2 text-xs text-white/70 border-t border-white/10">
-            🔧 Debug: {debugInfo}
-          </div>
-        )}
       </div>
 
+      {/* Messages */}
       <div className="flex-1 max-w-4xl mx-auto w-full px-4 py-6">
         {messages.length === 0 ? (
           <div className="h-[60vh] grid place-items-center">
@@ -260,14 +214,18 @@ export default function Chat() {
               <div className="text-xl sm:text-2xl mb-2">
                 {profileName ? `${profileName}, how can I help you?` : 'How can I help you?'}
               </div>
-              <div className="text-white/60 text-sm">Start the conversation below</div>
+              <div className="text-white/60 text-sm">Ask me anything - I'll give you detailed answers</div>
             </div>
           </div>
         ) : (
           <div className="space-y-3">
             {messages.map(m => (
               <div key={m.id} className={m.role === 'user' ? 'text-right' : 'text-left'}>
-                <div className={`inline-block px-3 py-2 rounded-lg ${m.role==='user' ? 'bg-blue-600' : 'bg-white/10'}`}>
+                <div className={`inline-block px-3 py-2 rounded-lg max-w-[80%] ${
+                  m.role==='user' 
+                    ? 'bg-blue-600' 
+                    : 'bg-white/10'
+                }`}>
                   {m.content}
                 </div>
               </div>
@@ -277,13 +235,14 @@ export default function Chat() {
         )}
       </div>
 
+      {/* Input */}
       <div className="max-w-4xl mx-auto w-full px-4 pb-6">
         <div className="flex gap-2">
           <input
             value={input}
             onChange={(e)=>setInput(e.target.value)}
             onKeyDown={(e)=> e.key==='Enter' && !e.shiftKey ? (e.preventDefault(), send()) : null}
-            placeholder="Type your message…"
+            placeholder="Ask me anything..."
             className="flex-1 rounded-md bg-white/10 px-3 py-3 outline-none focus:ring-2 ring-blue-400"
           />
           <button
