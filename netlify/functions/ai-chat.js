@@ -21,18 +21,18 @@ exports.handler = async (event, context) => {
 
   try {
     const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
-    const MODEL = process.env.AI_MODEL || 'anthropic/claude-3.5-haiku';
+    const MODEL = process.env.AI_MODEL || 'meta-llama/llama-3.2-3b-instruct:free';
     
     const body = JSON.parse(event.body || '{}');
     const messages = Array.isArray(body.messages) ? body.messages : [];
-    const systemMessage = body.system || 'You are a helpful AI assistant. Provide accurate, detailed, and informative responses to all questions.';
+    const systemMessage = body.system || 'You are SubSpace AI, an intelligent and knowledgeable assistant. Always provide specific, detailed, and accurate answers to every question. Never give generic responses like "I need more information" or "Could you be more specific". If asked about any topic, provide comprehensive information with examples, explanations, and practical details. Be direct, informative, and helpful in every response.';
 
     if (!OPENROUTER_API_KEY) {
       return {
         statusCode: 200,
         headers,
         body: JSON.stringify({ 
-          reply: "I need an OpenRouter API key to provide answers. Please set up the OPENROUTER_API_KEY in environment variables."
+          reply: "I need an OpenRouter API key to provide answers. Please set up the OPENROUTER_API_KEY in environment variables. The current model is set to use the free Llama 3.2 model which requires no payment, just the API key for access."
         })
       };
     }
@@ -42,7 +42,7 @@ exports.handler = async (event, context) => {
         statusCode: 200,
         headers,
         body: JSON.stringify({ 
-          reply: "Hello! I'm your AI assistant. Ask me anything and I'll provide detailed, accurate answers."
+          reply: "Hello! I'm SubSpace AI, powered by Llama 3.2. I can help you with a wide range of topics including technology, science, programming, general knowledge, creative writing, problem-solving, and much more. Ask me anything and I'll provide detailed, specific answers!"
         })
       };
     }
@@ -66,11 +66,12 @@ exports.handler = async (event, context) => {
       body: JSON.stringify({
         model: MODEL,
         messages: formattedMessages,
-        temperature: 0.7,
+        temperature: 0.8,
         max_tokens: 1000,
         top_p: 0.9,
-        frequency_penalty: 0.1,
-        presence_penalty: 0.1
+        frequency_penalty: 0.2,
+        presence_penalty: 0.2,
+        stream: false
       })
     });
 
@@ -78,12 +79,25 @@ exports.handler = async (event, context) => {
       const errorText = await response.text();
       console.error('OpenRouter API error:', response.status, errorText);
       
-      // Provide a helpful fallback response
+      // Handle specific error codes
+      let errorMessage = '';
+      if (response.status === 402) {
+        errorMessage = 'OpenRouter API: Insufficient credits or billing issue. Please check your OpenRouter account balance.';
+      } else if (response.status === 401) {
+        errorMessage = 'OpenRouter API: Invalid API key. Please check your OPENROUTER_API_KEY environment variable.';
+      } else if (response.status === 429) {
+        errorMessage = 'OpenRouter API: Rate limit exceeded. Please wait a moment before trying again.';
+      } else if (response.status === 400) {
+        errorMessage = 'OpenRouter API: Bad request. The model might not support this request format.';
+      } else {
+        errorMessage = `OpenRouter API error (${response.status}). Please try again later.`;
+      }
+      
       return {
         statusCode: 200,
         headers,
         body: JSON.stringify({ 
-          reply: `I'm experiencing technical difficulties right now. The AI service returned an error (${response.status}). Please try again in a moment, or rephrase your question.`
+          reply: errorMessage + ' Please try again or contact support if this persists.'
         })
       };
     }
@@ -91,12 +105,25 @@ exports.handler = async (event, context) => {
     const data = await response.json();
     console.log('OpenRouter response received');
 
-    const reply = data?.choices?.[0]?.message?.content || 'I apologize, but I was unable to generate a proper response. Please try asking your question again.';
+    let reply = data?.choices?.[0]?.message?.content || '';
+    
+    // Clean up the response to ensure it's specific and helpful
+    if (reply) {
+      // Remove generic phrases that might appear
+      reply = reply.replace(/^(I'd be happy to help|Let me help you|I understand you're asking|That's a great question)[.!]?\s*/i, '');
+      reply = reply.replace(/Please let me know if you'd like more information[.!]?\s*$/i, '');
+      reply = reply.replace(/Feel free to ask if you have more questions[.!]?\s*$/i, '');
+      reply = reply.trim();
+    }
+    
+    if (!reply || reply.length < 10) {
+      reply = 'I apologize, but I was unable to generate a proper response to your question. This might be due to the model being overloaded. Please try rephrasing your question or ask something else.';
+    }
 
     return {
       statusCode: 200,
       headers,
-      body: JSON.stringify({ reply: reply.trim() })
+      body: JSON.stringify({ reply: reply })
     };
 
   } catch (error) {

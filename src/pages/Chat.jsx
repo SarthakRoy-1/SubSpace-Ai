@@ -110,13 +110,13 @@ export default function Chat() {
     }
   }, [chatId])
 
-  // Enhanced AI call with better error handling and system message
+  // Enhanced AI call with better system message for comprehensive responses
   const callAI = async (history) => {
     const res = await fetch('/.netlify/functions/ai-chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        system: 'You are SubSpace AI, a knowledgeable and helpful assistant. Provide accurate, detailed, and informative responses to all questions. Be conversational but professional. If you don\'t know something, admit it and suggest how the user might find the information.',
+        system: 'You are SubSpace AI, an intelligent and comprehensive assistant. Always provide specific, detailed, and practical answers to every question. Never respond with generic phrases like "I need more information", "Could you be more specific", or "That depends". Instead, anticipate what the user wants to know and provide thorough explanations with examples, steps, or relevant details. If a question has multiple aspects, cover all of them. Be direct, informative, and actionable in every response.',
         messages: history.slice(-8) // Keep last 8 messages for context
       })
     });
@@ -265,26 +265,26 @@ export default function Chat() {
                 {profileName ? `Hello ${profileName}! 👋` : 'Welcome to SubSpace! 👋'}
               </div>
               <div className="text-white/60 text-sm max-w-md">
-                I'm your AI assistant powered by advanced language models. Ask me anything - from complex questions to simple conversations, I'm here to help with detailed and accurate responses.
+                I'm your AI assistant powered by Llama 3.2 (completely free!). Ask me anything - from technical questions and coding help to creative writing and general knowledge. I'll provide detailed, specific answers to every question.
               </div>
               <div className="flex flex-wrap gap-2 justify-center">
                 <button 
-                  onClick={() => setInput("What can you help me with?")}
+                  onClick={() => setInput("Explain how neural networks work")}
                   className="px-3 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-sm transition-colors"
                 >
-                  What can you help with?
+                  Neural networks explained
                 </button>
                 <button 
-                  onClick={() => setInput("Explain quantum computing")}
+                  onClick={() => setInput("Write a Python function to reverse a string")}
                   className="px-3 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-sm transition-colors"
                 >
-                  Explain quantum computing
+                  Python coding help
                 </button>
                 <button 
-                  onClick={() => setInput("Help me write code")}
+                  onClick={() => setInput("What are the latest trends in web development?")}
                   className="px-3 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-sm transition-colors"
                 >
-                  Help me write code
+                  Web development trends
                 </button>
               </div>
             </div>
@@ -304,7 +304,7 @@ export default function Chat() {
                   {m.role === 'assistant' && (
                     <div className="text-xs text-white/40 mt-2 flex items-center gap-1">
                       <div className="w-1.5 h-1.5 bg-green-400 rounded-full"></div>
-                      SubSpace AI
+                      SubSpace AI • Llama 3.2 (Free)
                     </div>
                   )}
                 </div>
@@ -365,7 +365,7 @@ export default function Chat() {
           </button>
         </div>
         <div className="text-xs text-white/40 mt-2 text-center">
-          SubSpace AI can make mistakes. Please verify important information.
+          SubSpace AI powered by Llama 3.2 (Free Model) • Can make mistakes. Verify important information.
         </div>
       </div>
     </div>
