@@ -31,14 +31,14 @@ It features smooth **animated backgrounds**, secure **authentication flows**, an
 ## 📸 Screenshots
 
 ### 🆕 Sign Up
-![Sign Up](assets\screenshots\Sign-Up.png)
+![Sign Up](assets/screenshots/Sign-Up.png)
 
 ### 🔐 Sign In
-![Sign In](assets\screenshots\Sign-In.png)
+![Sign In](assets/screenshots/Sign-In.png)
 
 ### 💬 Chat Interface
-![New Chat](assets\screenshots\New_Chatbox.png)
-![Response](assets\screenshots\Chat_Response.png)
+![New Chat](assets/screenshots/New_Chatbox.png)
+![Response](assets/screenshots/Chat_Response.png)
 
 
 
@@ -89,3 +89,4 @@ This project is licensed under the MIT License.
 ```bash
 git clone https://github.com/SarthakRoy-1/SubSpace-Ai.git
 cd SubSpace-Ai
+
