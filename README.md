@@ -28,6 +28,11 @@ It features smooth **animated backgrounds**, secure **authentication flows**, an
 
 ---
 
+## 🌐 Live Demo
+🔗 [Try SubSpace on Netlify](https://subspace-ai.netlify.app)
+
+---
+
 ## 📸 Screenshots
 
 ### 🆕 Sign Up
@@ -89,4 +94,5 @@ This project is licensed under the MIT License.
 ```bash
 git clone https://github.com/SarthakRoy-1/SubSpace-Ai.git
 cd SubSpace-Ai
+
 
