@@ -1,8 +1,7 @@
-echo "node_modules/
+node_modules/
 dist/
 .vite/
 *.log
 .env
-.env.*"
-# Local Netlify folder
-.netlify
+.env.*
+.netlify/
