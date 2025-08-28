@@ -43,6 +43,7 @@ export default function Chat() {
       const { data: chats, error } = await supabase
         .from('chats')
         .select('id')
+        .eq('user_id', session.user.id) // ✨ NEW: scope chats to this user
         .order('created_at', { ascending: true })
         .limit(1)
 
@@ -110,46 +111,48 @@ export default function Chat() {
     }
   }, [chatId])
 
-  // Enhanced AI call with better system message for comprehensive responses
+  // Enhanced AI call
   const callAI = async (history) => {
     const res = await fetch('/.netlify/functions/ai-chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        system: 'You are SubSpace AI, an intelligent and comprehensive assistant. Always provide specific, detailed, and practical answers to every question. Never respond with generic phrases like "I need more information", "Could you be more specific", or "That depends". Instead, anticipate what the user wants to know and provide thorough explanations with examples, steps, or relevant details. If a question has multiple aspects, cover all of them. Be direct, informative, and actionable in every response.',
+        system:
+          'You are SubSpace AI, an intelligent and comprehensive assistant. Always provide specific, detailed, and practical answers to every question. Never respond with generic phrases like "I need more information", "Could you be more specific", or "That depends". Instead, anticipate what the user wants to know and provide thorough explanations with examples, steps, or relevant details. If a question has multiple aspects, cover all of them. Be direct, informative, and actionable in every response.',
         messages: history.slice(-8) // Keep last 8 messages for context
       })
-    });
+    })
 
     if (!res.ok) {
-      const errorText = await res.text();
-      console.error('AI API Error:', res.status, errorText);
-      throw new Error(`AI service error (${res.status}). Please try again.`);
+      const errorText = await res.text()
+      console.error('AI API Error:', res.status, errorText)
+      throw new Error(`AI service error (${res.status}). Please try again.`)
     }
 
-    const data = await res.json();
-    
+    const data = await res.json()
+
     if (!data?.reply) {
-      throw new Error('Invalid response from AI service.');
+      throw new Error('Invalid response from AI service.')
     }
-    
-    return data.reply;
-  };
 
-  // Send message with better error handling
-  const send = async () => {
-    if (!chatId || !input.trim()) return
-    const text = input.trim()
+    return data.reply
+  }
+
+  // ✏️ CHANGED: allow optional text override (used by suggestion chips)
+  const send = async (textOverride) => {
+    if (!chatId) return
+    const textToUse = (textOverride ?? input).trim()
+    if (!textToUse) return
     setInput('')
     setLoading(true)
 
     const tmpUserId = 'tmp_user_' + Date.now()
-    const userMsg = { 
-      id: tmpUserId, 
-      chat_id: chatId, 
-      role: 'user', 
-      content: text, 
-      created_at: new Date().toISOString() 
+    const userMsg = {
+      id: tmpUserId,
+      chat_id: chatId,
+      role: 'user',
+      content: textToUse,
+      created_at: new Date().toISOString()
     }
     setMessages(prev => [...prev, userMsg])
 
@@ -157,10 +160,10 @@ export default function Chat() {
       // Save user message
       const { data: insertedUser, error: e1 } = await supabase
         .from('messages')
-        .insert({ chat_id: chatId, role: 'user', content: text })
+        .insert({ chat_id: chatId, role: 'user', content: textToUse })
         .select('id, role, content, created_at')
         .single()
-      
+
       if (e1) {
         console.error('Database error saving user message:', e1)
         throw new Error('Failed to save message. Please try again.')
@@ -173,52 +176,50 @@ export default function Chat() {
         ...messages
           .filter(m => !String(m.id).startsWith('tmp_'))
           .map(m => ({ role: m.role, content: m.content })),
-        { role: 'user', content: text }
+        { role: 'user', content: textToUse }
       ]
-      
+
       const reply = await callAI(history)
 
-      // Add AI message
+      // Add AI message (optimistic)
       const tmpBotId = 'tmp_bot_' + Date.now()
-      const botMsg = { 
-        id: tmpBotId, 
-        chat_id: chatId, 
-        role: 'assistant', 
-        content: reply, 
-        created_at: new Date().toISOString() 
+      const botMsg = {
+        id: tmpBotId,
+        chat_id: chatId,
+        role: 'assistant',
+        content: reply,
+        created_at: new Date().toISOString()
       }
       setMessages(prev => [...prev, botMsg])
 
-      // Save AI message
+      // Persist AI message
       const { data: insertedBot, error: e2 } = await supabase
         .from('messages')
         .insert({ chat_id: chatId, role: 'assistant', content: reply })
         .select('id, role, content, created_at')
         .single()
-      
+
       if (e2) {
         console.error('Database error saving AI message:', e2)
-        // Keep the message in UI even if DB save fails
+        // Keep optimistic message if DB fails
         return
       }
 
       setMessages(prev => prev.map(m => (m.id === tmpBotId ? insertedBot : m)))
-      
     } catch (err) {
       console.error('send error:', err)
       // Remove temp messages and show error
       setMessages(prev => prev.filter(m => !String(m.id).startsWith('tmp_')))
-      
-      // Add error message from AI
-      const errorMsg = { 
-        id: 'error_' + Date.now(), 
-        chat_id: chatId, 
-        role: 'assistant', 
-        content: `Sorry, I encountered an error: ${err.message}. Please try asking your question again.`, 
-        created_at: new Date().toISOString() 
+
+      // Add error message
+      const errorMsg = {
+        id: 'error_' + Date.now(),
+        chat_id: chatId,
+        role: 'assistant',
+        content: `Sorry, I encountered an error: ${err.message}. Please try asking your question again.`,
+        created_at: new Date().toISOString()
       }
       setMessages(prev => [...prev, errorMsg])
-      
     } finally {
       setLoading(false)
       setTimeout(() => scrollRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
@@ -229,7 +230,7 @@ export default function Chat() {
     if (!chatId) return
     const confirmed = window.confirm('Are you sure you want to clear all messages?')
     if (!confirmed) return
-    
+
     await supabase.from('messages').delete().eq('chat_id', chatId)
     seenIds.current = new Set()
     setMessages([])
@@ -245,8 +246,8 @@ export default function Chat() {
             <div className="text-xs text-white/50 bg-white/10 px-2 py-1 rounded">AI Chat</div>
           </div>
           <div className="flex items-center gap-3">
-            <button 
-              onClick={clear} 
+            <button
+              onClick={clear}
               className="px-3 py-1.5 rounded bg-white/10 hover:bg-white/20 transition-colors text-sm"
             >
               Clear Chat
@@ -261,27 +262,34 @@ export default function Chat() {
         {messages.length === 0 ? (
           <div className="h-[60vh] grid place-items-center">
             <div className="text-center space-y-4">
+              {/* ✨ NEW: exact phrasing requested */}
               <div className="text-xl sm:text-2xl font-medium">
-                {profileName ? `Hello ${profileName}! 👋` : 'Welcome to SubSpace! 👋'}
+                {profileName
+                  ? `${profileName}, how can I help you?`
+                  : 'How can I help you?'}
               </div>
-              <div className="text-white/60 text-sm max-w-md">
-                I'm your AI assistant powered by Llama 3.2 (completely free!). Ask me anything - from technical questions and coding help to creative writing and general knowledge. I'll provide detailed, specific answers to every question.
+
+              {/* ✨ NEW: softer helper line retained but trimmed */}
+              <div className="text-white/60 text-sm max-w-md mx-auto">
+                Ask me anything — I’ll give specific, step-by-step, and practical answers.
               </div>
+
+              {/* ✏️ CHANGED: quick prompts send instantly */}
               <div className="flex flex-wrap gap-2 justify-center">
-                <button 
-                  onClick={() => setInput("Explain how neural networks work")}
+                <button
+                  onClick={() => send('Explain how neural networks work')}
                   className="px-3 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-sm transition-colors"
                 >
                   Neural networks explained
                 </button>
-                <button 
-                  onClick={() => setInput("Write a Python function to reverse a string")}
+                <button
+                  onClick={() => send('Write a Python function to reverse a string')}
                   className="px-3 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-sm transition-colors"
                 >
                   Python coding help
                 </button>
-                <button 
-                  onClick={() => setInput("What are the latest trends in web development?")}
+                <button
+                  onClick={() => send('What are the latest trends in web development?')}
                   className="px-3 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-sm transition-colors"
                 >
                   Web development trends
@@ -293,18 +301,20 @@ export default function Chat() {
           <div className="space-y-4">
             {messages.map(m => (
               <div key={m.id} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div className={`max-w-[85%] sm:max-w-[70%] ${
-                  m.role === 'user' 
-                    ? 'bg-blue-600 text-white' 
-                    : 'bg-white/10 text-white'
-                } px-4 py-3 rounded-2xl ${
-                  m.role === 'user' ? 'rounded-br-md' : 'rounded-bl-md'
-                }`}>
+                <div
+                  className={`max-w-[85%] sm:max-w-[70%] ${
+                    m.role === 'user'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-white/10 text-white'
+                  } px-4 py-3 rounded-2xl ${
+                    m.role === 'user' ? 'rounded-br-md' : 'rounded-bl-md'
+                  }`}
+                >
                   <div className="whitespace-pre-wrap break-words">{m.content}</div>
                   {m.role === 'assistant' && (
                     <div className="text-xs text-white/40 mt-2 flex items-center gap-1">
                       <div className="w-1.5 h-1.5 bg-green-400 rounded-full"></div>
-                      SubSpace AI • Llama 3.2 (Free)
+                      SubSpace AI
                     </div>
                   )}
                 </div>
@@ -316,8 +326,8 @@ export default function Chat() {
                   <div className="flex items-center gap-2 text-white/60">
                     <div className="flex space-x-1">
                       <div className="w-2 h-2 bg-white/40 rounded-full animate-bounce"></div>
-                      <div className="w-2 h-2 bg-white/40 rounded-full animate-bounce" style={{animationDelay: '0.1s'}}></div>
-                      <div className="w-2 h-2 bg-white/40 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
+                      <div className="w-2 h-2 bg-white/40 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                      <div className="w-2 h-2 bg-white/40 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
                     </div>
                     <span className="text-sm">SubSpace AI is thinking...</span>
                   </div>
@@ -339,7 +349,7 @@ export default function Chat() {
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault()
-                  send()
+                  send() // ✏️ CHANGED: uses new send()
                 }
               }}
               placeholder="Ask me anything... (Press Shift+Enter for new line)"
@@ -357,7 +367,7 @@ export default function Chat() {
             />
           </div>
           <button
-            onClick={send}
+            onClick={() => send()} // ✏️ CHANGED
             disabled={loading || !chatId || !input.trim()}
             className="px-4 py-3 rounded-xl bg-blue-500 hover:bg-blue-600 disabled:opacity-60 disabled:cursor-not-allowed transition-colors font-medium"
           >
