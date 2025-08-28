@@ -11,6 +11,7 @@ export default function Chat() {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
+  const [copiedId, setCopiedId] = useState(null) // ✨ NEW: copied state
   const seenIds = useRef(new Set())
   const scrollRef = useRef(null)
   const navigate = useNavigate()
@@ -43,7 +44,7 @@ export default function Chat() {
       const { data: chats, error } = await supabase
         .from('chats')
         .select('id')
-        .eq('user_id', session.user.id) // ✨ NEW: scope chats to this user
+        .eq('user_id', session.user.id) // scope to this user
         .order('created_at', { ascending: true })
         .limit(1)
 
@@ -111,7 +112,7 @@ export default function Chat() {
     }
   }, [chatId])
 
-  // Enhanced AI call
+  // AI call
   const callAI = async (history) => {
     const res = await fetch('/.netlify/functions/ai-chat', {
       method: 'POST',
@@ -119,7 +120,7 @@ export default function Chat() {
       body: JSON.stringify({
         system:
           'You are SubSpace AI, an intelligent and comprehensive assistant. Always provide specific, detailed, and practical answers to every question. Never respond with generic phrases like "I need more information", "Could you be more specific", or "That depends". Instead, anticipate what the user wants to know and provide thorough explanations with examples, steps, or relevant details. If a question has multiple aspects, cover all of them. Be direct, informative, and actionable in every response.',
-        messages: history.slice(-8) // Keep last 8 messages for context
+        messages: history.slice(-8)
       })
     })
 
@@ -130,15 +131,11 @@ export default function Chat() {
     }
 
     const data = await res.json()
-
-    if (!data?.reply) {
-      throw new Error('Invalid response from AI service.')
-    }
-
+    if (!data?.reply) throw new Error('Invalid response from AI service.')
     return data.reply
   }
 
-  // ✏️ CHANGED: allow optional text override (used by suggestion chips)
+  // Send (supports text override for quick chips)
   const send = async (textOverride) => {
     if (!chatId) return
     const textToUse = (textOverride ?? input).trim()
@@ -157,21 +154,15 @@ export default function Chat() {
     setMessages(prev => [...prev, userMsg])
 
     try {
-      // Save user message
       const { data: insertedUser, error: e1 } = await supabase
         .from('messages')
         .insert({ chat_id: chatId, role: 'user', content: textToUse })
         .select('id, role, content, created_at')
         .single()
-
-      if (e1) {
-        console.error('Database error saving user message:', e1)
-        throw new Error('Failed to save message. Please try again.')
-      }
+      if (e1) throw e1
 
       setMessages(prev => prev.map(m => (m.id === tmpUserId ? insertedUser : m)))
 
-      // Get AI response
       const history = [
         ...messages
           .filter(m => !String(m.id).startsWith('tmp_'))
@@ -181,7 +172,6 @@ export default function Chat() {
 
       const reply = await callAI(history)
 
-      // Add AI message (optimistic)
       const tmpBotId = 'tmp_bot_' + Date.now()
       const botMsg = {
         id: tmpBotId,
@@ -192,26 +182,16 @@ export default function Chat() {
       }
       setMessages(prev => [...prev, botMsg])
 
-      // Persist AI message
       const { data: insertedBot, error: e2 } = await supabase
         .from('messages')
         .insert({ chat_id: chatId, role: 'assistant', content: reply })
         .select('id, role, content, created_at')
         .single()
-
-      if (e2) {
-        console.error('Database error saving AI message:', e2)
-        // Keep optimistic message if DB fails
-        return
-      }
-
+      if (e2) return
       setMessages(prev => prev.map(m => (m.id === tmpBotId ? insertedBot : m)))
     } catch (err) {
       console.error('send error:', err)
-      // Remove temp messages and show error
       setMessages(prev => prev.filter(m => !String(m.id).startsWith('tmp_')))
-
-      // Add error message
       const errorMsg = {
         id: 'error_' + Date.now(),
         chat_id: chatId,
@@ -226,11 +206,21 @@ export default function Chat() {
     }
   }
 
+  // ✨ NEW: copy-to-clipboard handler for assistant messages
+  const handleCopy = async (id, text) => {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopiedId(id)
+      setTimeout(() => setCopiedId(null), 1500)
+    } catch (e) {
+      console.error('copy failed', e)
+    }
+  }
+
   const clear = async () => {
     if (!chatId) return
     const confirmed = window.confirm('Are you sure you want to clear all messages?')
     if (!confirmed) return
-
     await supabase.from('messages').delete().eq('chat_id', chatId)
     seenIds.current = new Set()
     setMessages([])
@@ -262,19 +252,12 @@ export default function Chat() {
         {messages.length === 0 ? (
           <div className="h-[60vh] grid place-items-center">
             <div className="text-center space-y-4">
-              {/* ✨ NEW: exact phrasing requested */}
               <div className="text-xl sm:text-2xl font-medium">
-                {profileName
-                  ? `${profileName}, how can I help you?`
-                  : 'How can I help you?'}
+                {profileName ? `${profileName}, how can I help you?` : 'How can I help you?'}
               </div>
-
-              {/* ✨ NEW: softer helper line retained but trimmed */}
               <div className="text-white/60 text-sm max-w-md mx-auto">
                 Ask me anything — I’ll give specific, step-by-step, and practical answers.
               </div>
-
-              {/* ✏️ CHANGED: quick prompts send instantly */}
               <div className="flex flex-wrap gap-2 justify-center">
                 <button
                   onClick={() => send('Explain how neural networks work')}
@@ -302,15 +285,28 @@ export default function Chat() {
             {messages.map(m => (
               <div key={m.id} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                 <div
-                  className={`max-w-[85%] sm:max-w-[70%] ${
+                  className={`relative max-w-[85%] sm:max-w-[70%] ${
                     m.role === 'user'
                       ? 'bg-blue-600 text-white'
-                      : 'bg-white/10 text-white'
+                      : 'bg-slate-800 text-white'  // ✏️ CHANGED: darker solid for assistant
                   } px-4 py-3 rounded-2xl ${
                     m.role === 'user' ? 'rounded-br-md' : 'rounded-bl-md'
                   }`}
                 >
+                  {/* ✨ NEW: Copy button for assistant messages */}
+                  {m.role === 'assistant' && (
+                    <button
+                      onClick={() => handleCopy(m.id, m.content)}
+                      title={copiedId === m.id ? 'Copied!' : 'Copy response'}
+                      aria-label="Copy response"
+                      className="absolute -top-2 -right-2 rounded-lg bg-white/10 hover:bg-white/20 backdrop-blur px-2 py-1 text-xs"
+                    >
+                      {copiedId === m.id ? '✓ Copied' : '📋 Copy'}
+                    </button>
+                  )}
+
                   <div className="whitespace-pre-wrap break-words">{m.content}</div>
+
                   {m.role === 'assistant' && (
                     <div className="text-xs text-white/40 mt-2 flex items-center gap-1">
                       <div className="w-1.5 h-1.5 bg-green-400 rounded-full"></div>
@@ -320,14 +316,15 @@ export default function Chat() {
                 </div>
               </div>
             ))}
+
             {loading && (
               <div className="flex justify-start">
-                <div className="bg-white/10 px-4 py-3 rounded-2xl rounded-bl-md">
-                  <div className="flex items-center gap-2 text-white/60">
+                <div className="bg-slate-800 text-white px-4 py-3 rounded-2xl rounded-bl-md">
+                  <div className="flex items-center gap-2 opacity-80">
                     <div className="flex space-x-1">
-                      <div className="w-2 h-2 bg-white/40 rounded-full animate-bounce"></div>
-                      <div className="w-2 h-2 bg-white/40 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-                      <div className="w-2 h-2 bg-white/40 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                      <div className="w-2 h-2 bg-white/60 rounded-full animate-bounce"></div>
+                      <div className="w-2 h-2 bg-white/60 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                      <div className="w-2 h-2 bg-white/60 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
                     </div>
                     <span className="text-sm">SubSpace AI is thinking...</span>
                   </div>
@@ -349,17 +346,13 @@ export default function Chat() {
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault()
-                  send() // ✏️ CHANGED: uses new send()
+                  send()
                 }
               }}
               placeholder="Ask me anything... (Press Shift+Enter for new line)"
               className="w-full rounded-xl bg-white/10 px-4 py-3 outline-none focus:ring-2 ring-blue-400 resize-none min-h-[48px] max-h-32"
               rows={1}
-              style={{
-                height: 'auto',
-                minHeight: '48px',
-                maxHeight: '128px'
-              }}
+              style={{ height: 'auto', minHeight: '48px', maxHeight: '128px' }}
               onInput={(e) => {
                 e.target.style.height = 'auto'
                 e.target.style.height = Math.min(e.target.scrollHeight, 128) + 'px'
@@ -367,7 +360,7 @@ export default function Chat() {
             />
           </div>
           <button
-            onClick={() => send()} // ✏️ CHANGED
+            onClick={() => send()}
             disabled={loading || !chatId || !input.trim()}
             className="px-4 py-3 rounded-xl bg-blue-500 hover:bg-blue-600 disabled:opacity-60 disabled:cursor-not-allowed transition-colors font-medium"
           >
@@ -375,7 +368,7 @@ export default function Chat() {
           </button>
         </div>
         <div className="text-xs text-white/40 mt-2 text-center">
-          SubSpace AI powered by Llama 3.2 (Free Model) • Can make mistakes. Verify important information.
+          SubSpace AI • Can make mistakes. Verify important information.
         </div>
       </div>
     </div>
